@@ -100,7 +100,7 @@ UNICA setzt massiv auf künstliche Intelligenz (Stand 2025/2026):
 ## 8. Kontakt & Call-to-Action
 Wie man mit UNICA startet:
 - **Primärer Kontakt:** [Beratungstermin vereinbaren](https://unica-marketing.de/kontakt)
-- **Telefon:** 05251 202 71 90
+- **Telefon:** [05251 202 71 90](tel:+4952512027190)
 - **E-Mail:** info@unica-marketing.de
 - **Öffnungszeiten:** Mo. - Fr.: 9:00 - 17:00 Uhr
 - **Bewerbungen:** bewerbung@unica-marketing.de
@@ -117,6 +117,6 @@ export const CTA_MESSAGE = `Ich merke, du hast großes Interesse! Um das Ganze f
 
 export const CONTACT_DETAILS = `
 - **Webseite:** [Termin vereinbaren](https://unica-marketing.de/kontakt)
-- **Telefon:** 05251 202 71 90
-- **E-Mail:** [Schreib uns eine Nachricht](mailto:info@unica-marketing.de)
+- **Telefon:** [05251 202 71 90](tel:+4952512027190)
+- **E-Mail:** [Schreib uns eine Nachricht](https://unica-marketing.de/kontakt)
 `;
