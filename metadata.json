@@ -1,0 +1,7 @@
+{
+  "name": "Copy of UNICA Marketing Chatbot",
+  "description": "A conversational AI chatbot for UNICA Marketing, providing information about their services, projects, and expertise in a friendly and professional manner.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
