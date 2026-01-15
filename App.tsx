@@ -1,6 +1,6 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 // FIX: Removed LiveSession from import as it is not an exported member.
+// FIX: Added Blob to import if needed from SDK, otherwise standard Blob is used.
 import { GoogleGenAI, Chat, LiveServerMessage, Modality } from '@google/genai';
 import { Header } from './components/Header';
 import { ChatInput } from './components/ChatInput';
@@ -51,11 +51,13 @@ async function decodeAudioData(
   return buffer;
 }
 
+// Helper interface for the blob structure expected by the API
 interface MediaBlob {
   data: string;
   mimeType: string;
 }
 
+// FIX: Reverted to returning a plain object structure compatible with the SDK expectation
 function createBlob(data: Float32Array): MediaBlob {
     const l = data.length;
     const int16 = new Int16Array(l);
@@ -107,8 +109,6 @@ const App: React.FC = () => {
     }
   }, [messages]);
 
-  // FIX: Removed getApiKey function to use process.env.API_KEY directly as per guidelines. This also resolves the `import.meta.env` error.
-
   const resetChatState = () => {
     setMessages([
       { role: Role.Model, content: "Willkommen bei UNICA! 👋" },
@@ -123,12 +123,13 @@ const App: React.FC = () => {
     setIsBotSpeaking(false);
   };
   
+  // FIX: Updated to use import.meta.env.VITE_API_KEY directly.
   const handleSelectMode = (selectedMode: 'text' | 'voice') => {
     resetChatState();
     
-    // FIX: Removed API key retrieval logic and used process.env.API_KEY directly.
     if (selectedMode === 'text') {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // WICHTIG: Nutzt jetzt import.meta.env für Vite
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
       chatRef.current = ai.chats.create({
         model: 'gemini-3-flash-preview',
         config: { systemInstruction: SYSTEM_INSTRUCTION },
@@ -211,6 +212,7 @@ const App: React.FC = () => {
     sessionPromiseRef.current = null;
   }, []);
 
+  // FIX: Updated to use import.meta.env.VITE_API_KEY directly.
   const startConversation = async () => {
     setIsConnecting(true);
     resetChatState();
@@ -219,8 +221,9 @@ const App: React.FC = () => {
       inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // FIX: Used process.env.API_KEY directly.
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
+      // WICHTIG: Nutzt jetzt import.meta.env für Vite
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
       
       sessionPromiseRef.current = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
