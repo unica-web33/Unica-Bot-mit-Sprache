@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleGenAI, Chat, LiveSession, LiveServerMessage, Modality } from '@google/genai';
+// FIX: Removed LiveSession from import as it is not an exported member.
+import { GoogleGenAI, Chat, LiveServerMessage, Modality } from '@google/genai';
 import { Header } from './components/Header';
 import { ChatInput } from './components/ChatInput';
 import { ChatMessage } from './components/ChatMessage';
@@ -85,7 +86,8 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   
   const chatRef = useRef<Chat | null>(null);
-  const sessionPromiseRef = useRef<Promise<LiveSession> | null>(null);
+  // FIX: Replaced LiveSession with 'any' as it is not an exported type.
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // Audio refs
@@ -105,6 +107,8 @@ const App: React.FC = () => {
     }
   }, [messages]);
 
+  // FIX: Removed getApiKey function to use process.env.API_KEY directly as per guidelines. This also resolves the `import.meta.env` error.
+
   const resetChatState = () => {
     setMessages([
       { role: Role.Model, content: "Willkommen bei UNICA! 👋" },
@@ -121,6 +125,8 @@ const App: React.FC = () => {
   
   const handleSelectMode = (selectedMode: 'text' | 'voice') => {
     resetChatState();
+    
+    // FIX: Removed API key retrieval logic and used process.env.API_KEY directly.
     if (selectedMode === 'text') {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       chatRef.current = ai.chats.create({
@@ -213,6 +219,7 @@ const App: React.FC = () => {
       inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // FIX: Used process.env.API_KEY directly.
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       sessionPromiseRef.current = ai.live.connect({
@@ -284,7 +291,8 @@ const App: React.FC = () => {
                 currentOutputTranscriptionRef.current = '';
             }
           },
-          onerror: (e: Error) => { console.error('Session error:', e); handleDisconnect(); },
+          // FIX: Changed type of 'e' from Error to ErrorEvent to match the expected callback signature.
+          onerror: (e: ErrorEvent) => { console.error('Session error:', e); handleDisconnect(); },
           onclose: () => handleDisconnect(),
         },
       });

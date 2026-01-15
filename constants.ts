@@ -118,5 +118,5 @@ export const CTA_MESSAGE = `Ich merke, du hast großes Interesse! Um das Ganze f
 export const CONTACT_DETAILS = `
 - **Webseite:** [Termin vereinbaren](https://unica-marketing.de/kontakt)
 - **Telefon:** [05251 202 71 90](tel:+4952512027190)
-- **E-Mail:** [Schreib uns eine Nachricht](https://unica-marketing.de/kontakt)
+- **E-Mail:** [Schreib uns eine Nachricht](mailto:info@unica-marketing.de)
 `;
