@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-// FIX: Removed LiveSession from import as it is not an exported member.
-// FIX: Added Blob to import if needed from SDK, otherwise standard Blob is used.
+// FIX: Removed Blob from the @google/genai import to resolve a runtime error,
+// as the CDN module does not export this type.
 import { GoogleGenAI, Chat, LiveServerMessage, Modality } from '@google/genai';
 import { Header } from './components/Header';
 import { ChatInput } from './components/ChatInput';
@@ -11,6 +12,13 @@ import { QuickReplyButtons } from './components/QuickReplyButtons';
 import { MicrophoneIcon } from './components/icons/MicrophoneIcon';
 import { SendIcon } from './components/icons/SendIcon';
 import { LoadingSpinner } from './components/icons/LoadingSpinner';
+
+// --- Local Type Definition ---
+// FIX: Defined the Blob interface locally to ensure type safety without relying on a missing module export.
+interface Blob {
+  data: string;
+  mimeType: string;
+}
 
 // --- Audio Utility Functions ---
 function encode(bytes: Uint8Array): string {
@@ -51,14 +59,8 @@ async function decodeAudioData(
   return buffer;
 }
 
-// Helper interface for the blob structure expected by the API
-interface MediaBlob {
-  data: string;
-  mimeType: string;
-}
-
-// FIX: Reverted to returning a plain object structure compatible with the SDK expectation
-function createBlob(data: Float32Array): MediaBlob {
+// The function now returns the official Blob type from the SDK.
+function createBlob(data: Float32Array): Blob {
     const l = data.length;
     const int16 = new Int16Array(l);
     for (let i = 0; i < l; i++) {
@@ -88,7 +90,6 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   
   const chatRef = useRef<Chat | null>(null);
-  // FIX: Replaced LiveSession with 'any' as it is not an exported type.
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
@@ -96,8 +97,9 @@ const App: React.FC = () => {
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const processorUrlRef = useRef<string | null>(null);
   const outputSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef(0);
   const currentInputTranscriptionRef = useRef('');
@@ -123,13 +125,16 @@ const App: React.FC = () => {
     setIsBotSpeaking(false);
   };
   
-  // FIX: Updated to use import.meta.env.VITE_API_KEY directly.
   const handleSelectMode = (selectedMode: 'text' | 'voice') => {
     resetChatState();
     
     if (selectedMode === 'text') {
-      // WICHTIG: Nutzt jetzt import.meta.env für Vite
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) {
+          console.error("API key not found.");
+          return;
+      }
+      const ai = new GoogleGenAI({ apiKey });
       chatRef.current = ai.chats.create({
         model: 'gemini-3-flash-preview',
         config: { systemInstruction: SYSTEM_INSTRUCTION },
@@ -155,7 +160,6 @@ const App: React.FC = () => {
     }
   }, [ctaSent]);
 
-  // --- Text Chat Logic ---
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || isLoading) return;
 
@@ -189,15 +193,19 @@ const App: React.FC = () => {
 
   // --- Voice Chat Logic ---
   const stopMicrophone = () => {
-    if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.onaudioprocess = null;
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
+    if (audioWorkletNodeRef.current) {
+      audioWorkletNodeRef.current.port.onmessage = null;
+      audioWorkletNodeRef.current.disconnect();
+      audioWorkletNodeRef.current = null;
     }
     mediaStreamSourceRef.current?.disconnect();
-    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
     mediaStreamSourceRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop());
     mediaStreamRef.current = null;
+    if (processorUrlRef.current) {
+      URL.revokeObjectURL(processorUrlRef.current);
+      processorUrlRef.current = null;
+    }
   };
 
   const handleDisconnect = useCallback(() => {
@@ -212,32 +220,77 @@ const App: React.FC = () => {
     sessionPromiseRef.current = null;
   }, []);
 
-  // FIX: Updated to use import.meta.env.VITE_API_KEY directly.
   const startConversation = async () => {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+        console.error("API key not found.");
+        return;
+    }
+      
     setIsConnecting(true);
     resetChatState();
 
     try {
       inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      if (inputAudioContextRef.current.state === 'suspended') {
+        await inputAudioContextRef.current.resume();
+      }
       outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      if (outputAudioContextRef.current.state === 'suspended') {
+        await outputAudioContextRef.current.resume();
+      }
       mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      // WICHTIG: Nutzt jetzt import.meta.env für Vite
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
+
+      // Using an AudioWorklet is the modern replacement for the deprecated ScriptProcessorNode.
+      // It runs in a separate thread, is more efficient, and avoids the "Operation not implemented" error.
+      const audioWorkletProcessorCode = `
+class AudioDataSenderProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const inputChannelData = inputs[0][0];
+    if (inputChannelData) {
+      // Post the raw audio buffer back to the main thread for sending to the API.
+      this.port.postMessage(inputChannelData.buffer, [inputChannelData.buffer]);
+    }
+    // Return true to keep the processor alive.
+    return true;
+  }
+}
+registerProcessor('audio-data-sender-processor', AudioDataSenderProcessor);
+`;
+      const blob = new Blob([audioWorkletProcessorCode], { type: 'application/javascript' });
+      processorUrlRef.current = URL.createObjectURL(blob);
       
       sessionPromiseRef.current = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         config: { systemInstruction: SYSTEM_INSTRUCTION, responseModalities: [Modality.AUDIO], inputAudioTranscription: {}, outputAudioTranscription: {} },
         callbacks: {
-          onopen: () => {
-            if (!inputAudioContextRef.current || !mediaStreamRef.current) return;
+          onopen: async () => {
+            if (!inputAudioContextRef.current || !mediaStreamRef.current || !processorUrlRef.current) return;
+            
+            try {
+              await inputAudioContextRef.current.audioWorklet.addModule(processorUrlRef.current);
+            } catch (e) {
+              console.error("Error adding AudioWorklet module:", e);
+              handleDisconnect();
+              return;
+            }
+
             setIsConnecting(false);
             setIsConnected(true);
+
             mediaStreamSourceRef.current = inputAudioContextRef.current.createMediaStreamSource(mediaStreamRef.current);
-            scriptProcessorRef.current = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
-            scriptProcessorRef.current.onaudioprocess = (e) => sessionPromiseRef.current?.then((s) => s.sendRealtimeInput({ media: createBlob(e.inputBuffer.getChannelData(0)) }));
-            mediaStreamSourceRef.current.connect(scriptProcessorRef.current);
-            scriptProcessorRef.current.connect(inputAudioContextRef.current.destination);
+            audioWorkletNodeRef.current = new AudioWorkletNode(inputAudioContextRef.current, 'audio-data-sender-processor');
+            
+            audioWorkletNodeRef.current.port.onmessage = (event) => {
+              const pcmData = new Float32Array(event.data);
+              sessionPromiseRef.current?.then((s) => s.sendRealtimeInput({ media: createBlob(pcmData) }));
+            };
+
+            mediaStreamSourceRef.current.connect(audioWorkletNodeRef.current);
+            // Connect to destination to keep the node processing, it will be silent as the worklet has no output.
+            audioWorkletNodeRef.current.connect(inputAudioContextRef.current.destination);
           },
           onmessage: async (message: LiveServerMessage) => {
             const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
@@ -294,7 +347,6 @@ const App: React.FC = () => {
                 currentOutputTranscriptionRef.current = '';
             }
           },
-          // FIX: Changed type of 'e' from Error to ErrorEvent to match the expected callback signature.
           onerror: (e: ErrorEvent) => { console.error('Session error:', e); handleDisconnect(); },
           onclose: () => handleDisconnect(),
         },
@@ -317,7 +369,6 @@ const App: React.FC = () => {
     else if (!isConnecting) startConversation();
   };
 
-  // --- Download Chat ---
   const handleDownload = () => {
     const formattedChat = messages
       .map(msg => `${msg.role === Role.User ? 'Du' : 'UNICA'}: ${msg.content}`)
@@ -333,7 +384,6 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
   
-  // --- Render Logic ---
   if (mode === 'start') {
     return (
       <div className="flex flex-col h-screen bg-white items-center justify-center font-sans">
